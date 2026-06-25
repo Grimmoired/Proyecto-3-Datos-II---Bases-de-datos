@@ -1,4 +1,4 @@
-# Proyecto #3 - Bases de datos
+# Proyecto #3 - Bases de datos.
 
 Curso de Algoritmos y Estructuras de Datos II (CE 2103)
 Instituto Tecnológico de Costa Rica — I Semestre 2026
