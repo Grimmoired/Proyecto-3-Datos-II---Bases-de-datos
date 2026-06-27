@@ -1,12 +1,3 @@
-//
-// Created by j1p2p3a4 on 6/16/2026.
-//
-
-#ifndef UNTITLED2_STORAGEMANAGER_H
-#define UNTITLED2_STORAGEMANAGER_H
-
-
-
 #pragma once
 #include <string>
 #include <vector>
@@ -15,7 +6,7 @@
 
 class StorageManager {
 private:
-    std::string dataPath;  // carpeta raiz donde viven las carpetas de cada DB
+    std::string dataPath;
 
     std::string tablePath(const std::string& dbName, const std::string& tableName) const;
     int rowSize(const Table& table) const;
@@ -34,8 +25,9 @@ public:
 
     void insertRow(const Table& table, const Row& row);
     std::vector<Row> readAllRows(const Table& table) const;
+    Row readRowAtOffset(const Table& table, long long offset) const;
     void writeAllRows(const Table& table, const std::vector<Row>& rows);
 
     int countRows(const Table& table) const;
+    long long getFileSize(const std::string& dbName, const std::string& tableName) const;
 };
-#endif //UNTITLED2_STORAGEMANAGER_H
