@@ -1,7 +1,3 @@
-//
-// Created by j1p2p3a4 on 6/16/2026.
-//
-
 #include "StorageManager.h"
 #include <fstream>
 #include <filesystem>
@@ -10,12 +6,9 @@
 
 namespace fs = std::filesystem;
 
-// Tamaños fijos por tipo en disco
 static const int SIZE_INTEGER  = 4;
 static const int SIZE_DOUBLE   = 8;
-static const int SIZE_DATETIME = 20; // "YYYY-MM-DD HH:MM:SS\0"
-
-// Cifrado XOR simple
+static const int SIZE_DATETIME = 20;
 static const char XOR_KEY = 0x5A;
 
 StorageManager::StorageManager(const std::string& path) {
@@ -32,7 +25,6 @@ void StorageManager::encryptBuffer(char* buf, int size) const {
 }
 
 void StorageManager::decryptBuffer(char* buf, int size) const {
-    // XOR es simetrico
     encryptBuffer(buf, size);
 }
 
@@ -111,7 +103,6 @@ std::string StorageManager::readField(const char* buf, int& offset, const Column
     return result;
 }
 
-
 void StorageManager::createDatabase(const std::string& dbName) {
     fs::create_directories(dataPath + "/" + dbName);
 }
@@ -163,9 +154,29 @@ std::vector<Row> StorageManager::readAllRows(const Table& table) const {
         result.push_back(r);
         pos += rsize;
 
-        encryptBuffer(buf.data(), rsize); // restaurar para proxima lectura
+        encryptBuffer(buf.data(), rsize);
     }
     return result;
+}
+
+Row StorageManager::readRowAtOffset(const Table& table, long long offset) const {
+    int rsize = rowSize(table);
+    std::ifstream f(tablePath(table.getDatabaseName(), table.getName()), std::ios::binary);
+    if (!f) throw std::runtime_error("Cannot open table file");
+
+    f.seekg(offset);
+    std::vector<char> buf(rsize);
+    f.read(buf.data(), rsize);
+    decryptBuffer(buf.data(), rsize);
+
+    std::vector<std::string> fields;
+    int off = 0;
+    for (const auto& col : table.getColumns())
+        fields.push_back(readField(buf.data(), off, col));
+
+    Row r(fields);
+    r.setDiskOffset(offset);
+    return r;
 }
 
 void StorageManager::writeAllRows(const Table& table, const std::vector<Row>& rows) {
@@ -191,4 +202,10 @@ int StorageManager::countRows(const Table& table) const {
     if (rsize == 0) return 0;
     uintmax_t fileSize = fs::file_size(path);
     return (int)(fileSize / rsize);
+}
+
+long long StorageManager::getFileSize(const std::string& dbName, const std::string& tableName) const {
+    std::string path = tablePath(dbName, tableName);
+    if (!fs::exists(path)) return 0;
+    return (long long)fs::file_size(path);
 }
