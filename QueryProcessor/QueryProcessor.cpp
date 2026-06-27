@@ -1,12 +1,7 @@
-//
-// Created by j1p2p3a4 on 6/16/2026.
-//
-
 #include "QueryProcessor.h"
 #include <stdexcept>
 #include <algorithm>
 #include <sstream>
-
 
 QueryProcessor::QueryProcessor(const std::string& catalogPath, const std::string& dataPath)
     : catalog(catalogPath), storage(dataPath) {
@@ -33,7 +28,6 @@ QueryResult QueryProcessor::execute(const std::string& sql) {
         return {false, std::string("Error: ") + e.what(), {}, {}};
     }
 }
-
 
 std::string QueryProcessor::indexKey(const std::string& db, const std::string& table) const {
     return db + "." + table;
@@ -69,7 +63,6 @@ void QueryProcessor::loadIndexesFromCatalog() {
             if (type == "BST")   h.bst   = new BST();
             if (type == "BTREE") h.btree = new BTree();
 
-            // Cargar datos existentes en el indice
             auto rows = storage.readAllRows(table);
             for (const auto& row : rows) {
                 std::string val = row.getField(colIdx);
@@ -117,13 +110,11 @@ bool QueryProcessor::matchesWhere(const Row& row, const Table& table,
     if (idx < 0) throw std::runtime_error("Column not found: " + where.column);
     std::string val = row.getField(idx);
 
-    if (where.op == "=")  return val == where.value;
-    if (where.op == ">")  return val > where.value;
-    if (where.op == "<")  return val < where.value;
-    if (where.op == "NOT") return val != where.value;
-    if (where.op == "LIKE") {
-        return val.find(where.value) != std::string::npos;
-    }
+    if (where.op == "=")    return val == where.value;
+    if (where.op == ">")    return val > where.value;
+    if (where.op == "<")    return val < where.value;
+    if (where.op == "NOT")  return val != where.value;
+    if (where.op == "LIKE") return val.find(where.value) != std::string::npos;
     return false;
 }
 
@@ -154,7 +145,6 @@ QueryResult QueryProcessor::execSetDatabase(const ParsedStatement& s) {
     currentDb = s.databaseName;
     return {true, "Database set to: " + s.databaseName, {}, {}};
 }
-
 
 QueryResult QueryProcessor::execCreateTable(const ParsedStatement& s) {
     if (currentDb.empty()) return {false, "No database selected", {}, {}};
@@ -197,7 +187,6 @@ QueryResult QueryProcessor::execCreateIndex(const ParsedStatement& s) {
     int colIdx = table.getColumnIndex(s.indexColumn);
     if (colIdx < 0) return {false, "Column not found: " + s.indexColumn, {}, {}};
 
-    // Verificar duplicados en datos existentes
     auto rows = storage.readAllRows(table);
     std::unordered_map<std::string, int> seen;
     for (const auto& row : rows) {
@@ -206,7 +195,6 @@ QueryResult QueryProcessor::execCreateIndex(const ParsedStatement& s) {
         seen[val]++;
     }
 
-    // Crear indice en memoria
     IndexHandle h;
     h.type   = s.indexType;
     h.column = s.indexColumn;
@@ -224,13 +212,12 @@ QueryResult QueryProcessor::execCreateIndex(const ParsedStatement& s) {
 
     indexes[indexKey(currentDb, s.tableName)] = h;
 
-    // Registrar en catalogo
     IndexEntry entry;
-    strncpy(entry.indexName, s.indexName.c_str(), 63);  entry.indexName[63] = '\0';
-    strncpy(entry.tableName, s.tableName.c_str(), 63);  entry.tableName[63] = '\0';
+    strncpy(entry.indexName, s.indexName.c_str(), 63);   entry.indexName[63] = '\0';
+    strncpy(entry.tableName, s.tableName.c_str(), 63);   entry.tableName[63] = '\0';
     strncpy(entry.columnName, s.indexColumn.c_str(), 63); entry.columnName[63] = '\0';
-    strncpy(entry.dbName, currentDb.c_str(), 63);        entry.dbName[63] = '\0';
-    strncpy(entry.type, s.indexType.c_str(), 7);         entry.type[7] = '\0';
+    strncpy(entry.dbName, currentDb.c_str(), 63);         entry.dbName[63] = '\0';
+    strncpy(entry.type, s.indexType.c_str(), 7);          entry.type[7] = '\0';
     catalog.addIndex(entry);
 
     return {true, "Index created: " + s.indexName, {}, {}};
@@ -245,7 +232,6 @@ QueryResult QueryProcessor::execInsert(const ParsedStatement& s) {
     if ((int)s.insertValues.size() != (int)table.getColumns().size())
         return {false, "Value count does not match column count", {}, {}};
 
-    // Validar tipos
     for (int i = 0; i < (int)table.getColumns().size(); i++) {
         const Column& col = table.getColumns()[i];
         const std::string& val = s.insertValues[i];
@@ -257,7 +243,6 @@ QueryResult QueryProcessor::execInsert(const ParsedStatement& s) {
         }
     }
 
-    // Verificar duplicado en indice si existe
     std::string ikey = indexKey(currentDb, s.tableName);
     if (indexes.count(ikey)) {
         auto& h = indexes[ikey];
@@ -268,23 +253,16 @@ QueryResult QueryProcessor::execInsert(const ParsedStatement& s) {
         if (dup) return {false, "Duplicate key value: " + val, {}, {}};
     }
 
-    // Calcular offset antes de insertar
-    int rowSz = storage.countRows(table);
-    // El offset real es rowSz * rowSize, pero insertRow hace append
-    // Lee el file size despues del insert para obtener el offset correcto
+    // Offset = tamaño del archivo antes de insertar
+    long long offset = storage.getFileSize(currentDb, s.tableName);
+
     Row row(s.insertValues);
     storage.insertRow(table, row);
 
-    // El offset de la fila recien insertada es (conteo anterior) * rowSize
-    // Lo recalculamos leyendo todas las filas
-    auto allRows = storage.readAllRows(table);
-    long long newOffset = allRows.back().getDiskOffset();
-
-    // Actualizar indice
     if (indexes.count(ikey)) {
         auto& h = indexes[ikey];
         int colIdx = table.getColumnIndex(h.column);
-        insertIntoIndex(currentDb, s.tableName, s.insertValues[colIdx], newOffset);
+        insertIntoIndex(currentDb, s.tableName, s.insertValues[colIdx], offset);
     }
 
     return {true, "Row inserted", {}, {}};
@@ -298,7 +276,6 @@ QueryResult QueryProcessor::execSelect(const ParsedStatement& s) {
     Table table = catalog.getTable(currentDb, s.tableName);
     std::vector<Row> result;
 
-    // Usar indice si WHERE aplica sobre columna indexada
     std::string ikey = indexKey(currentDb, s.tableName);
     bool usedIndex = false;
 
@@ -306,12 +283,8 @@ QueryResult QueryProcessor::execSelect(const ParsedStatement& s) {
         auto& h = indexes[ikey];
         if (h.column == s.where.column) {
             long long offset = searchIndex(currentDb, s.tableName, s.where.value);
-            if (offset >= 0) {
-                auto allRows = storage.readAllRows(table);
-                for (const auto& row : allRows)
-                    if (row.getDiskOffset() == offset)
-                        result.push_back(row);
-            }
+            if (offset >= 0)
+                result.push_back(storage.readRowAtOffset(table, offset));
             usedIndex = true;
         }
     }
@@ -323,7 +296,6 @@ QueryResult QueryProcessor::execSelect(const ParsedStatement& s) {
                 result.push_back(row);
     }
 
-    // ORDER BY
     if (!s.orderByColumn.empty()) {
         int colIdx = table.getColumnIndex(s.orderByColumn);
         if (colIdx < 0) return {false, "Column not found: " + s.orderByColumn, {}, {}};
@@ -331,7 +303,6 @@ QueryResult QueryProcessor::execSelect(const ParsedStatement& s) {
         quicksort(result, colIdx, asc, 0, (int)result.size() - 1);
     }
 
-    // Columnas a retornar
     std::vector<std::string> headers;
     std::vector<int> colIdxs;
     if (s.selectAll) {
@@ -348,7 +319,6 @@ QueryResult QueryProcessor::execSelect(const ParsedStatement& s) {
         }
     }
 
-    // Proyectar columnas
     std::vector<Row> projected;
     for (const auto& row : result) {
         std::vector<std::string> vals;
@@ -374,14 +344,10 @@ QueryResult QueryProcessor::execUpdate(const ParsedStatement& s) {
 
     for (auto& row : rows) {
         if (matchesWhere(row, table, s.where)) {
-            // Si la columna actualizada esta indexada, actualizar indice
             if (indexes.count(ikey) && indexes[ikey].column == s.updateColumn) {
                 removeFromIndex(currentDb, s.tableName, row.getField(updateColIdx));
-                // El offset no cambia porque reescribimos todo
                 insertIntoIndex(currentDb, s.tableName, s.updateValue, row.getDiskOffset());
             }
-            // Mutar el campo directamente no es posible con getField/setField
-            // Reconstruimos la fila
             std::vector<std::string> fields;
             for (int i = 0; i < row.fieldCount(); i++)
                 fields.push_back(i == updateColIdx ? s.updateValue : row.getField(i));
@@ -407,7 +373,6 @@ QueryResult QueryProcessor::execDelete(const ParsedStatement& s) {
 
     for (const auto& row : rows) {
         if (matchesWhere(row, table, s.where)) {
-            // Remover del indice
             if (indexes.count(ikey)) {
                 int colIdx = table.getColumnIndex(indexes[ikey].column);
                 removeFromIndex(currentDb, s.tableName, row.getField(colIdx));
